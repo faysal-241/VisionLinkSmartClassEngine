@@ -1,0 +1,7 @@
+customtkinter
+opencv-python
+numpy
+Pillow
+face_recognition
+dlib
+pyttsx3

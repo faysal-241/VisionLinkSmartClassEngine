@@ -1,0 +1,4 @@
+__pycache__/
+ai_models/
+*.caffemodel
+*.prototxt
