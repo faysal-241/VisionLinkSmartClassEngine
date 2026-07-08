@@ -7,16 +7,35 @@ An AI-powered Smart Class System combining Zero-Latency Face Attendance and Auto
 * **Smart Energy Control:** Auto light/fan control using human presence detection.
 * **Plug & Play Hardware:** ESP32 with WiFiManager & mDNS (No hardcoded IP needed).
 
-## 🛠️ Hardware Setup Guide (ESP32)
-1. Open the `ESP32_Hardware_Code` folder and upload the `.ino` file to your ESP32 board.
-2. Connect your Relay module to **Pin 26 (Light)** and **Pin 27 (Fan)**.
-3. Power up the ESP32. It will automatically broadcast a WiFi hotspot named `VisionLink_Setup`.
-4. Connect to this hotspot from your phone. A portal will open.
-5. Select your local WiFi or Mobile Hotspot, enter the password, and click **Save**.
-6. The ESP32 is now connected! You never have to touch the hardware code again.
+## 🏗️ System Architecture
 
-## 💻 How to Run the Software
-1. Install requirements: `pip install -r requirements.txt`
-2. Run the engine: `python main.py`
-3. Connect your laptop to the same WiFi as the ESP32.
-4. Open the Dashboard and enjoy the magic!
+The system operates across three main layers: The Software Layer (AI & UI), The Network Layer, and The Hardware Layer (IoT).
+
+```mermaid
+graph TD
+    subgraph "Software Layer (Laptop / PC - Python)"
+        UI[🖥️ CustomTkinter UI Dashboard]
+        AI[🧠 Vision Engine Core <br>OpenCV & Face Recognition]
+        DB[(📁 Local Database <br>CSV & Known Faces)]
+        WQ[⚙️ Background Workers <br>Queue & Threading]
+        
+        UI <-->|Live Video & Status| AI
+        AI -->|Identify Faces| DB
+        UI <-->|Save/Fetch Records| DB
+        UI -->|Send HTTP Commands| WQ
+    end
+
+    subgraph "Network Layer (Zero-Latency Local Bridge)"
+        WIFI((📶 Local Wi-Fi / Hotspot))
+        WQ -- "Session Pooled HTTP GET <br> (visionlink.local)" --> WIFI
+    end
+
+    subgraph "Hardware Layer (ESP32 / Arduino)"
+        ESP[⚙️ ESP32 Web Server <br> Port 80 & mDNS]
+        R1[💡 Relay 1: Smart Lights]
+        R2[❄️ Relay 2: Smart Fans]
+        
+        WIFI --> ESP
+        ESP -->|Digital LOW/HIGH| R1
+        ESP -->|Digital LOW/HIGH| R2
+    end
