@@ -17,12 +17,14 @@ graph TD
         UI[🖥️ CustomTkinter UI Dashboard]
         AI[🧠 Vision Engine Core <br>OpenCV & Face Recognition]
         DB[(📁 Local Database <br>CSV & Known Faces)]
-        WQ[⚙️ Background Workers <br>Queue & Threading]
+        WQ[⚙️ Background Workers <br>HTTP Queue & Threading]
+        VQ[🔊 Voice Engine <br>pyttsx3 Audio Queue]
         
         UI <-->|Live Video & Status| AI
         AI -->|Identify Faces| DB
         UI <-->|Save/Fetch Records| DB
         UI -->|Send HTTP Commands| WQ
+        UI -->|Trigger Speech| VQ
     end
 
     subgraph "Network Layer (Zero-Latency Local Bridge)"
@@ -32,10 +34,12 @@ graph TD
 
     subgraph "Hardware Layer (ESP32 / Arduino)"
         ESP[⚙️ ESP32 Web Server <br> Port 80 & mDNS]
+        WM[🌐 WiFiManager <br> VisionLink_Setup Portal]
         R1[💡 Relay 1: Smart Lights]
         R2[❄️ Relay 2: Smart Fans]
         
         WIFI --> ESP
+        ESP <-->|Auto Recovery| WM
         ESP -->|Digital LOW/HIGH| R1
         ESP -->|Digital LOW/HIGH| R2
     end
