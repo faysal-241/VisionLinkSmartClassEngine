@@ -10,23 +10,23 @@ import face_recognition
 print("[SYSTEM] Loading Pure Human Structure AI Engine (Enterprise Hybrid Tracker)...")
 
 # ==============================================================================
-# 🧠 THE DEEP AI BRAIN (Runs on Core 2 - Heavy Identity Scanner)
+#  🧠  THE DEEP AI BRAIN (Runs on Core 2 - Heavy Identity Scanner)
 # ==============================================================================
 def ai_worker_core(frame_queue, result_queue, known_encodings, known_names, known_ids):
     while True:
         if frame_queue.empty():
             time.sleep(0.01)
             continue
-
-        # Core 1 থেকে ছোট ভিডিও ফ্রেম এবং বক্সগুলো গ্রহণ করা
+            
+        # Receive small video frames and boxes from Core 1
         data = frame_queue.get()
         frame = data['frame']
         live_boxes = data['boxes']
-        
+
         if len(live_boxes) > 0:
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             
-            # face_recognition লাইব্রেরির জন্য বক্সগুলোর স্টাইল ঠিক করা (Top, Right, Bottom, Left)
+            # Format boxes for face_recognition library (Top, Right, Bottom, Left)
             fr_boxes = [(startY, endX, endY, startX) for (startX, startY, endX, endY) in live_boxes]
             
             results = []
@@ -43,9 +43,9 @@ def ai_worker_core(frame_queue, result_queue, known_encodings, known_names, know
                         if matches[best_match_index]:
                             name = known_names[best_match_index]
                             student_id = known_ids[best_match_index]
-                    
+                            
                     results.append({'box': box, 'name': name, 'id': student_id})
-                
+                    
                 if not result_queue.empty():
                     try: result_queue.get_nowait()
                     except: pass
@@ -54,7 +54,7 @@ def ai_worker_core(frame_queue, result_queue, known_encodings, known_names, know
                 pass
 
 # ==============================================================================
-# 📷 THE LIVE TRACKER CORE (Runs on Core 1 - Super Fast 60FPS Tracker)
+#  📷  THE LIVE TRACKER CORE (Runs on Core 1 - Super Fast 60FPS Tracker)
 # ==============================================================================
 class VisionEngine:
     def __init__(self, camera_source=0):
@@ -73,7 +73,7 @@ class VisionEngine:
             print("[SUCCESS] Camera Connected!")
         else:
             print("[ERROR] No Camera Access!")
-
+            
         self.known_face_encodings = []
         self.known_face_names = []
         self.known_face_ids = []
@@ -84,11 +84,11 @@ class VisionEngine:
         
         self.load_known_faces()
         
-        # 2টি Core-এর মধ্যে ডেটা আদান-প্রদানের জন্য পাইপ
+        # Pipes for data communication between the 2 Cores
         self.frame_queue = multiprocessing.Queue(maxsize=1)
         self.result_queue = multiprocessing.Queue(maxsize=1)
         
-        # Core 2 (AI Brain) চালু করা হলো
+        # Start Core 2 (AI Brain)
         self.ai_process = multiprocessing.Process(
             target=ai_worker_core,
             args=(self.frame_queue, self.result_queue, self.known_face_encodings, self.known_face_names, self.known_face_ids),
@@ -166,17 +166,17 @@ class VisionEngine:
         ret, frame = self.cap.read()
         if not ret:
             return None, False
-
+            
         if isinstance(self.camera_source, str):
             frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
-
+            
         h, w = frame.shape[:2]
-
+        
         if not ai_active:
             self.presence_timer = 0
             final_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             return Image.fromarray(final_rgb), False
-
+            
         if scan_mode == "energy":
             blob_body = cv2.dnn.blobFromImage(cv2.resize(frame, (300, 300)), 0.007843, (300, 300), 127.5)
             self.body_net.setInput(blob_body)
@@ -205,17 +205,26 @@ class VisionEngine:
                         cv2.rectangle(frame, (startX, startY), (endX, endY), (0, 255, 0), 2)
                         cv2.putText(frame, f"Face Target: {int(confidence*100)}%", (startX, startY-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
                         human_found_now = True
-
+                        
             if human_found_now:
                 self.presence_timer = self.MAX_TIMER
             else:
                 if self.presence_timer > 0:
                     self.presence_timer -= 1
-                sec_left = int(self.presence_timer / 30) + 1
-                cv2.putText(frame, f"NO HUMAN! SLEEPING IN: {sec_left}s", (w//2 - 200, h//2), cv2.FONT_HERSHEY_DUPLEX, 1.0, (0, 0, 255), 3)
-
+                
+                # [BUG FIX 1]: Calculate exact time remaining (prevent 1s stuck) 
+                sec_left = max(0, int(self.presence_timer / 30))
+                alert_text = f"NO HUMAN! SLEEPING IN: {sec_left}s"
+                
+                # [BUG FIX 2]: Dynamically calculate text size to center it perfectly on ANY screen size
+                text_size = cv2.getTextSize(alert_text, cv2.FONT_HERSHEY_DUPLEX, 1.0, 3)[0]
+                text_x = (w - text_size[0]) // 2
+                text_y = h // 2
+                
+                cv2.putText(frame, alert_text, (text_x, text_y), cv2.FONT_HERSHEY_DUPLEX, 1.0, (0, 0, 255), 3)
+                
         elif scan_mode == "attendance":
-            # ১. Core 1-এর অত্যন্ত ফাস্ট লাইভ ট্র্যাকার (Zero Lag)
+            # 1. Ultra-fast live tracker of Core 1 (Zero Lag)
             blob_face = cv2.dnn.blobFromImage(cv2.resize(frame, (300, 300)), 1.0, (300, 300), (104.0, 177.0, 123.0))
             self.face_net.setInput(blob_face)
             face_detections = self.face_net.forward()
@@ -230,8 +239,8 @@ class VisionEngine:
                     endX, endY = min(w, endX), min(h, endY)
                     if endX - startX > 20 and endY - startY > 20:
                         current_live_boxes.append((startX, startY, endX, endY))
-
-            # ২. Core 2-কে শুধু চেহারা চেনার জন্য পাঠানো
+                        
+            # 2. Send to Core 2 only for face recognition
             if len(current_live_boxes) > 0 and self.frame_queue.empty():
                 small_f = cv2.resize(frame, (640, 480))
                 scale_x = 640 / w
@@ -239,13 +248,13 @@ class VisionEngine:
                 scaled_boxes = [(int(startX*scale_x), int(startY*scale_y), int(endX*scale_x), int(endY*scale_y)) for (startX, startY, endX, endY) in current_live_boxes]
                 try: self.frame_queue.put_nowait({'frame': small_f, 'boxes': scaled_boxes})
                 except: pass
-
-            # ৩. Core 2 থেকে রেজাল্ট রিসিভ করা
+                
+            # 3. Receive results from Core 2
             if not self.result_queue.empty():
                 try: self.latest_identified_faces = self.result_queue.get_nowait()
                 except: pass
-
-            # ৪. লাইভ বক্সের সাথে এআই-এর নাম জোড়া লাগানো
+                
+            # 4. Map AI names with live boxes
             for live_box in current_live_boxes:
                 startX, startY, endX, endY = live_box
                 display_name = "Scanning..."
@@ -258,7 +267,7 @@ class VisionEngine:
                 for id_data in self.latest_identified_faces:
                     c_startX, c_startY, c_endX, c_endY = id_data['box']
                     
-                    # Core 2-এর স্কেল ঠিক করা
+                    # Adjust Core 2 scaling
                     orig_c_startX = c_startX * (w / 640)
                     orig_c_endX = c_endX * (w / 640)
                     orig_c_startY = c_startY * (h / 480)
@@ -267,7 +276,7 @@ class VisionEngine:
                     cache_center_x = (orig_c_startX + orig_c_endX) / 2
                     cache_center_y = (orig_c_startY + orig_c_endY) / 2
                     
-                    # যদি লাইভ বক্স এবং এআই বক্স কাছাকাছি হয়, তবে নাম সেট হবে
+                    # If live box and AI box are close, set the name
                     if abs(live_center_x - cache_center_x) < 120 and abs(live_center_y - cache_center_y) < 120:
                         display_name = id_data['name']
                         display_id = id_data['id']
@@ -276,17 +285,16 @@ class VisionEngine:
                         else:
                             box_color = (0, 0, 255)
                         break
-
+                        
                 display_text = f"{display_id} {display_name}" if display_id != "" else display_name
                 text_color = (0, 0, 0) if display_name != "Unknown" and display_name != "Scanning..." else (255, 255, 255)
-
                 (text_width, text_height), _ = cv2.getTextSize(display_text, cv2.FONT_HERSHEY_DUPLEX, 0.6, 1)
                 background_endX = max(endX, startX + text_width + 10)
                 
                 cv2.rectangle(frame, (startX, startY), (endX, endY), box_color, 2)
                 cv2.rectangle(frame, (startX, endY - 30), (background_endX, endY), box_color, cv2.FILLED)
                 cv2.putText(frame, display_text, (startX + 5, endY - 5), cv2.FONT_HERSHEY_DUPLEX, 0.6, text_color, 1)
-
+                
         final_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         return Image.fromarray(final_rgb), self.presence_timer > 0
 
