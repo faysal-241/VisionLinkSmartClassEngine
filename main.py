@@ -5,12 +5,16 @@ import pyttsx3
 import threading
 import queue
 import time
-import os  # Required for killing zombie processes
+import os
 import sys
+import requests # [NEW]: Ultra-fast HTTP requests
 from vision_engine import VisionEngine
 from attendance_manager import AttendanceSessionManager
 
 voice_queue = queue.Queue()
+
+# [NEW]: Dedicated high-speed queue for zero-latency hardware signals
+hardware_queue = queue.Queue()
 
 def voice_worker():
     engine = pyttsx3.init()
@@ -26,7 +30,29 @@ def voice_worker():
             pass
         voice_queue.task_done()
 
+# [NEW]: Dedicated background worker for hardware signals (No TCP Handshake delay)
+def hardware_worker():
+    # Use Session to keep the TCP connection alive (Massive speed boost)
+    session = requests.Session()
+    # Using .local takes time to resolve DNS every time.
+    ESP32_HOST = "visionlink.local" 
+    
+    while True:
+        endpoint = hardware_queue.get()
+        if endpoint is None:
+            break
+        try:
+            url = f"http://{ESP32_HOST}/{endpoint}"
+            # Send signal instantly with a 1-second timeout to prevent blocking
+            session.get(url, timeout=1.0)
+            print(f"[HARDWARE] Signal sent instantly: {endpoint}")
+        except Exception as e:
+            print(f"[HARDWARE ERROR] Failed to reach ESP32: {e}")
+        hardware_queue.task_done()
+
+# Start background workers
 threading.Thread(target=voice_worker, daemon=True).start()
+threading.Thread(target=hardware_worker, daemon=True).start()
 
 def speak_text(text):
     voice_queue.put(text)
@@ -122,26 +148,21 @@ class VisionLinkApp(ctk.CTk):
         if hasattr(self, 'vision_engine'):
             self.vision_engine.release_camera()
         self.destroy()
-        os._exit(0)  # Permanently terminate all background processes in the terminal
+        os._exit(0)
 
     def camera_worker(self):
-        # [NEW FIX] This variable tracks the hardware state solely in the background thread
-        # It prevents the lethal "Race Condition" from forcing the timer to 0
         was_hardware_on_worker = False 
-        
         while True:
             try:
                 is_ai_active = self.ai_status_var.get()
                 is_any_device_on = self.light_var.get() or self.fan_var.get()
                 is_attendance_active = getattr(self, 'attendance_running', False)
                 
-                # [NEW FIX] If device just turned on manually, strictly enforce the timer reset here
                 if is_any_device_on and not was_hardware_on_worker:
                     self.vision_engine.presence_timer = self.vision_engine.MAX_TIMER
                 was_hardware_on_worker = is_any_device_on
                 
                 if is_attendance_active:
-                    # If paused, AI scan will stop, only camera feed will be shown
                     if self.session_manager.is_paused:
                         pil_image, human_present = self.vision_engine.get_frame(ai_active=False, scan_mode="attendance")
                     else:
@@ -174,7 +195,6 @@ class VisionLinkApp(ctk.CTk):
                 if self.current_tab == "energy" and hasattr(self, 'camera_screen'):
                     self.update_image_on_label(pil_image, self.camera_screen)
                     
-        # Live Background Data Capture (Adds only if not paused)
         if is_attendance_active and self.session_manager.is_active and not self.session_manager.is_paused:
             for face_data in getattr(self.vision_engine, 'latest_identified_faces', []):
                 s_id = face_data.get('id', '')
@@ -217,7 +237,6 @@ class VisionLinkApp(ctk.CTk):
                                 self.last_voice_state = "CLEAR"
                                 self.presence_label.configure(text="    👤    Human Presence: CLEAR", text_color=self.WARNING_ORANGE)
                                 
-                                # Automatically turn off hardware ONLY when timer reaches 0 and human is clear
                                 if self.light_var.get():
                                     self.light_var.set(False)
                                     self.manual_light_toggle()
@@ -230,7 +249,6 @@ class VisionLinkApp(ctk.CTk):
 
     def update_image_on_label(self, pil_image, label):
         orig_w, orig_h = pil_image.size
-        # Reduced max height to 540 to prevent UI Overflow (Buttons getting pushed off-screen)
         ratio = min(850 / orig_w, 540 / orig_h)
         new_w, new_h = int(orig_w * ratio), int(orig_h * ratio)
         ctk_img = ctk.CTkImage(light_image=pil_image, dark_image=pil_image, size=(new_w, new_h))
@@ -563,22 +581,15 @@ class VisionLinkApp(ctk.CTk):
         setattr(self, var_name + "_lbl", status)
         return card
 
+    # [NEW]: Simplified function that just puts the command in the high-speed queue
     def send_hardware_command(self, endpoint):
-        ESP32_IP = "http://visionlink.local"
-        def task():
-            try:
-                import urllib.request
-                urllib.request.urlopen(f"{ESP32_IP}/{endpoint}", timeout=1.5)
-            except Exception as e:
-                print(f"[Hardware Error] Cannot reach ESP32: {e}")
-        threading.Thread(target=task, daemon=True).start()
+        hardware_queue.put(endpoint)
 
     def manual_light_toggle(self):
         val, col = ("ON", self.NEON_GREEN) if self.light_var.get() else ("OFF", self.TEXT_WHITE)
         self.light_var_lbl.configure(text=val, text_color=col)
         state = "Activated" if self.light_var.get() else "Deactivated"
         if self.light_var.get():
-            # [NEW FIX] Securely transition UI state out of 'SLEEP' or 'CLEAR' when turned on manually
             self.vision_engine.presence_timer = self.vision_engine.MAX_TIMER
             self.last_voice_state = "COUNTING" 
             self.send_hardware_command("light_on")
@@ -591,7 +602,6 @@ class VisionLinkApp(ctk.CTk):
         self.fan_var_lbl.configure(text=val, text_color=col)
         state = "Activated" if self.fan_var.get() else "Deactivated"
         if self.fan_var.get():
-            # [NEW FIX] Securely transition UI state out of 'SLEEP' or 'CLEAR' when turned on manually
             self.vision_engine.presence_timer = self.vision_engine.MAX_TIMER
             self.last_voice_state = "COUNTING" 
             self.send_hardware_command("fan_on")
