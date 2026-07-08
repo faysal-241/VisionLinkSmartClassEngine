@@ -7,13 +7,12 @@ import queue
 import time
 import os
 import sys
-import requests # [NEW]: Ultra-fast HTTP requests
+import requests
+import csv
 from vision_engine import VisionEngine
 from attendance_manager import AttendanceSessionManager
 
 voice_queue = queue.Queue()
-
-# [NEW]: Dedicated high-speed queue for zero-latency hardware signals
 hardware_queue = queue.Queue()
 
 def voice_worker():
@@ -30,11 +29,9 @@ def voice_worker():
             pass
         voice_queue.task_done()
 
-# [NEW]: Dedicated background worker for hardware signals (No TCP Handshake delay)
 def hardware_worker():
-    # Use Session to keep the TCP connection alive (Massive speed boost)
     session = requests.Session()
-    # Using .local takes time to resolve DNS every time.
+    # Replace with your ESP32's actual Direct IP for zero-latency if needed
     ESP32_HOST = "visionlink.local" 
     
     while True:
@@ -43,14 +40,12 @@ def hardware_worker():
             break
         try:
             url = f"http://{ESP32_HOST}/{endpoint}"
-            # Send signal instantly with a 1-second timeout to prevent blocking
             session.get(url, timeout=1.0)
             print(f"[HARDWARE] Signal sent instantly: {endpoint}")
         except Exception as e:
             print(f"[HARDWARE ERROR] Failed to reach ESP32: {e}")
         hardware_queue.task_done()
 
-# Start background workers
 threading.Thread(target=voice_worker, daemon=True).start()
 threading.Thread(target=hardware_worker, daemon=True).start()
 
@@ -64,7 +59,6 @@ class VisionLinkApp(ctk.CTk):
         self.geometry("1300x800")
         ctk.set_appearance_mode("Dark")
         
-        # Triggered when the user closes the window (X button) to prevent zombie processes
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
         
         self.BG_MAIN = "#05080F"
@@ -127,8 +121,9 @@ class VisionLinkApp(ctk.CTk):
         self.setup_energy_frame()
         self.frame_attendance = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         self.setup_attendance_frame()
+        
         self.frame_records = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        ctk.CTkLabel(self.frame_records, text="   📋   ATTENDANCE RECORDS", font=ctk.CTkFont(size=36, weight="bold"), text_color=self.TEXT_WHITE).pack(pady=40)
+        self.setup_records_frame() 
         
         self.show_dashboard()
         self.update_live_system()
@@ -286,6 +281,143 @@ class VisionLinkApp(ctk.CTk):
                 
         self.after(1000, self.update_attendance_timer_ui)
 
+    def setup_records_frame(self):
+        top_bar = ctk.CTkFrame(self.frame_records, fg_color=self.BG_CARD, height=70, corner_radius=10, border_width=1, border_color=self.BORDER_MUTED)
+        top_bar.pack(side="top", fill="x", pady=(0, 20))
+        top_bar.pack_propagate(False)
+
+        ctk.CTkLabel(top_bar, text="   📋   ATTENDANCE RECORDS", font=ctk.CTkFont(size=22, weight="bold"), text_color=self.TEXT_WHITE).pack(side="left", padx=20)
+        
+        # [REMOVED global total present counter from here as per your brilliant logic]
+
+        filter_bar = ctk.CTkFrame(self.frame_records, fg_color="transparent", height=50)
+        filter_bar.pack(side="top", fill="x", pady=(0, 15))
+
+        self.search_entry = ctk.CTkEntry(filter_bar, placeholder_text="Search Name or ID...", width=250, border_color=self.ACCENT_CYAN)
+        self.search_entry.pack(side="left", padx=(0, 10))
+
+        self.date_entry = ctk.CTkEntry(filter_bar, placeholder_text="YYYY-MM-DD", width=150, border_color=self.ACCENT_CYAN)
+        self.date_entry.pack(side="left", padx=(0, 10))
+
+        btn_search = ctk.CTkButton(filter_bar, text=" 🔍  Search", width=100, font=ctk.CTkFont(weight="bold"), fg_color=self.BTN_HOVER_BG, border_width=1, border_color=self.ACCENT_CYAN, hover_color=self.ACTIVE_TAB_BG, command=self.refresh_records)
+        btn_search.pack(side="left", padx=(0, 10))
+
+        btn_refresh = ctk.CTkButton(filter_bar, text=" 🔄  Refresh", width=100, font=ctk.CTkFont(weight="bold"), fg_color=self.NEON_GREEN, text_color="#000000", hover_color="#059669", command=self.refresh_records)
+        btn_refresh.pack(side="left", padx=(0, 10))
+
+        btn_clear = ctk.CTkButton(filter_bar, text=" 🗑️  Clear Data", width=100, font=ctk.CTkFont(weight="bold"), fg_color="#4C0519", hover_color=self.ALERT_RED, command=self.clear_records_history)
+        btn_clear.pack(side="right", padx=(0, 0))
+
+        header_frame = ctk.CTkFrame(self.frame_records, fg_color="#0F172A", height=45, corner_radius=8)
+        header_frame.pack(side="top", fill="x")
+        header_frame.pack_propagate(False)
+
+        cols = [("Date", 130), ("Time", 130), ("Student ID", 150), ("Student Name", 300), ("Status", 100)]
+        for col_name, col_width in cols:
+            lbl = ctk.CTkLabel(header_frame, text=col_name, font=ctk.CTkFont(size=14, weight="bold"), text_color=self.TEXT_WHITE, width=col_width, anchor="w")
+            lbl.pack(side="left", padx=15)
+
+        self.records_list = ctk.CTkScrollableFrame(self.frame_records, fg_color=self.BG_CARD, corner_radius=10, border_width=1, border_color=self.BORDER_MUTED)
+        self.records_list.pack(side="top", fill="both", expand=True, pady=(10, 0))
+
+        self.refresh_records()
+
+    def refresh_records(self):
+        """Reads attendance.csv, filters data, groups into slots with counts, and populates the table."""
+        search_q = self.search_entry.get().strip().lower()
+        date_q = self.date_entry.get().strip()
+
+        for widget in self.records_list.winfo_children():
+            widget.destroy()
+
+        if not os.path.exists("attendance.csv"):
+            ctk.CTkLabel(self.records_list, text="No attendance data found in the database.", font=ctk.CTkFont(size=16), text_color=self.TEXT_MUTED).pack(pady=30)
+            return
+
+        try:
+            # 1. Gather and Group the Data
+            slots_data = {}
+            total_matches = 0
+
+            with open("attendance.csv", mode="r", encoding="utf-8") as file:
+                reader = csv.reader(file)
+
+                for row in reader:
+                    if len(row) < 5: 
+                        continue
+                    if row[0].strip().lower() == "date":
+                        continue
+                        
+                    r_date, r_time, r_id, r_name, r_status = row
+
+                    # Apply Search and Date filters
+                    if date_q and date_q != r_date: 
+                        continue
+                    if search_q and (search_q not in r_id.lower() and search_q not in r_name.lower()): 
+                        continue
+
+                    # Group by Date and Time
+                    slot_key = (r_date, r_time)
+                    if slot_key not in slots_data:
+                        slots_data[slot_key] = []
+                    
+                    slots_data[slot_key].append(row)
+                    total_matches += 1
+
+            if total_matches == 0:
+                ctk.CTkLabel(self.records_list, text="No matches found for your search.", font=ctk.CTkFont(size=16), text_color=self.TEXT_MUTED).pack(pady=30)
+                return
+
+            # 2. Render the Data Group by Group
+            for (r_date, r_time), students in slots_data.items():
+                slot_count = len(students)
+                
+                # Format Date
+                try:
+                    dt_obj = datetime.strptime(r_date, "%Y-%m-%d")
+                    weekday_name = dt_obj.strftime("%A")
+                    formatted_date = dt_obj.strftime("%d %b %Y")
+                except Exception:
+                    weekday_name = "Unknown Day"
+                    formatted_date = r_date
+                    
+                # Create the Banner
+                slot_banner = ctk.CTkFrame(self.records_list, fg_color="#1E293B", corner_radius=6, height=35)
+                slot_banner.pack(side="top", fill="x", pady=(15, 5), padx=10)
+                slot_banner.pack_propagate(False)
+                
+                banner_text = f" 📌 ATTENDANCE SLOT   |   📅 {weekday_name}, {formatted_date}   |   ⏰ Saved Time: {r_time}"
+                ctk.CTkLabel(slot_banner, text=banner_text, font=ctk.CTkFont(size=14, weight="bold"), text_color=self.WARNING_ORANGE).pack(side="left", padx=15)
+                
+                # [NEW]: Total Present count specifically for this slot on the right side
+                count_text = f"Total Present: {slot_count}"
+                ctk.CTkLabel(slot_banner, text=count_text, font=ctk.CTkFont(size=14, weight="bold"), text_color=self.NEON_GREEN).pack(side="right", padx=15)
+
+                # Render Student Rows for this slot
+                for row in students:
+                    _, _, r_id, r_name, r_status = row
+                    
+                    row_frame = ctk.CTkFrame(self.records_list, fg_color="transparent", height=40)
+                    row_frame.pack(side="top", fill="x", pady=2)
+                    row_frame.pack_propagate(False)
+
+                    ctk.CTkLabel(row_frame, text=r_date, font=ctk.CTkFont(size=13), text_color=self.TEXT_MUTED, width=130, anchor="w").pack(side="left", padx=15)
+                    ctk.CTkLabel(row_frame, text=r_time, font=ctk.CTkFont(size=13), text_color=self.TEXT_MUTED, width=130, anchor="w").pack(side="left", padx=15)
+                    ctk.CTkLabel(row_frame, text=r_id, font=ctk.CTkFont(size=13, weight="bold"), text_color=self.ACCENT_CYAN, width=150, anchor="w").pack(side="left", padx=15)
+                    ctk.CTkLabel(row_frame, text=r_name, font=ctk.CTkFont(size=13), text_color=self.TEXT_WHITE, width=300, anchor="w").pack(side="left", padx=15)
+                    ctk.CTkLabel(row_frame, text=r_status, font=ctk.CTkFont(size=13, weight="bold"), text_color=self.NEON_GREEN, width=100, anchor="w").pack(side="left", padx=15)
+
+                    ctk.CTkFrame(self.records_list, fg_color=self.BORDER_MUTED, height=1).pack(fill="x", padx=15)
+
+        except Exception as e:
+            ctk.CTkLabel(self.records_list, text=f"Error reading database file: {e}", font=ctk.CTkFont(size=16), text_color=self.ALERT_RED).pack(pady=30)
+
+    def clear_records_history(self):
+        if os.path.exists("attendance.csv"):
+            os.remove("attendance.csv")
+            speak_text("Attendance database has been cleared.")
+            self.refresh_records()
+
     def setup_attendance_frame(self):
         top_bar = ctk.CTkFrame(self.frame_attendance, fg_color=self.BG_CARD, height=60, corner_radius=10, border_width=1, border_color=self.BORDER_MUTED)
         top_bar.pack(side="top", fill="x", pady=(0, 20))
@@ -388,6 +520,7 @@ class VisionLinkApp(ctk.CTk):
             speak_text("Attendance session securely saved to database.")
             self.present_count_lbl.configure(text=" 💾  SAVED!", text_color=self.ACCENT_CYAN)
             self.stop_live_session()
+            self.refresh_records() 
 
     def add_student_to_ui_list(self, s_id, s_name):
         count = len(self.session_manager.present_students)
@@ -581,7 +714,6 @@ class VisionLinkApp(ctk.CTk):
         setattr(self, var_name + "_lbl", status)
         return card
 
-    # [NEW]: Simplified function that just puts the command in the high-speed queue
     def send_hardware_command(self, endpoint):
         hardware_queue.put(endpoint)
 
@@ -669,6 +801,7 @@ class VisionLinkApp(ctk.CTk):
         self.hide_all_frames()
         self.frame_records.pack(fill="both", expand=True)
         self.btn_records.configure(fg_color=self.ACTIVE_TAB_BG, border_color=self.ACCENT_CYAN, text_color=self.ACCENT_CYAN)
+        self.refresh_records()
 
 if __name__ == "__main__":
     app = VisionLinkApp()
