@@ -14,8 +14,6 @@ from vision_engine import VisionEngine
 from attendance_manager import AttendanceSessionManager
 
 voice_queue = queue.Queue()
-
-# [NEW]: Dedicated high-speed queue for zero-latency hardware signals
 hardware_queue = queue.Queue()
 
 # [NEW]: Thread-safe lock for shared camera frame data
@@ -74,7 +72,6 @@ def hardware_worker():
             print(f"[HARDWARE ERROR] Failed to reach ESP32: {e}")
         hardware_queue.task_done()
 
-# Start background workers
 threading.Thread(target=voice_worker, daemon=True).start()
 threading.Thread(target=hardware_worker, daemon=True).start()
 
@@ -89,7 +86,6 @@ class VisionLinkApp(ctk.CTk):
         self.minsize(1100, 700)
         ctk.set_appearance_mode("Dark")
         
-        # Triggered when the user closes the window (X button) to prevent zombie processes
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
         
         self.BG_MAIN = "#090D16"         # Dark Slate Black
@@ -162,6 +158,7 @@ class VisionLinkApp(ctk.CTk):
         self.setup_energy_frame()
         self.frame_attendance = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         self.setup_attendance_frame()
+        
         self.frame_records = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         self.setup_records_frame()  # [NEW]: Full records tab
         
@@ -831,7 +828,6 @@ class VisionLinkApp(ctk.CTk):
         setattr(self, var_name + "_lbl", status)
         return card
 
-    # [NEW]: Simplified function that just puts the command in the high-speed queue
     def send_hardware_command(self, endpoint):
         hardware_queue.put(endpoint)
 
