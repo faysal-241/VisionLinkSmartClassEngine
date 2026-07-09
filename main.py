@@ -451,6 +451,25 @@ class VisionLinkApp(ctk.CTk):
         )
         self.time_slot_menu.pack(side="left")
 
+        # [NEW]: Camera selection in top bar
+        ctk.CTkLabel(top_bar, text="📷  Camera:", font=ctk.CTkFont(size=14, weight="bold"), text_color=self.TEXT_WHITE).pack(side="left", padx=(30, 10))
+        self.attendance_camera_var = ctk.StringVar(value="Laptop Camera")
+        self.attendance_camera_menu = ctk.CTkOptionMenu(
+            top_bar,
+            values=["Laptop Camera", "USB Camera", "Mobile Camera"],
+            variable=self.attendance_camera_var,
+            width=150,
+            height=32,
+            fg_color=self.BG_MAIN,
+            button_color=self.BG_MAIN,
+            button_hover_color=self.BTN_HOVER_BG,
+            dropdown_fg_color=self.BG_CARD,
+            dropdown_hover_color=self.BTN_HOVER_BG,
+            dropdown_text_color=self.TEXT_WHITE,
+            command=self.change_attendance_camera
+        )
+        self.attendance_camera_menu.pack(side="left")
+
         self.timer_label = ctk.CTkLabel(top_bar, text=" ⏱  15:00", font=ctk.CTkFont(size=24, weight="bold"), text_color=self.TEXT_MUTED)
         self.timer_label.pack(side="right", padx=30)
         
@@ -789,9 +808,13 @@ class VisionLinkApp(ctk.CTk):
         if cam_type == "laptop":
             self.vision_engine.change_camera(0)
             speak_text("Switched to Laptop Camera")
+            if hasattr(self, 'attendance_camera_var'):
+                self.attendance_camera_var.set("Laptop Camera")
         elif cam_type == "usb":
             self.vision_engine.change_camera(1)
             speak_text("Switched to USB Camera")
+            if hasattr(self, 'attendance_camera_var'):
+                self.attendance_camera_var.set("USB Camera")
         elif cam_type == "mobile":
             url = self.ip_cam_entry.get().strip()
             if url == "":
@@ -808,6 +831,37 @@ class VisionLinkApp(ctk.CTk):
                             url += "/video"
                     self.vision_engine.change_camera(url)
                     speak_text("Switched to Mobile Camera")
+                if hasattr(self, 'attendance_camera_var'):
+                    self.attendance_camera_var.set("Mobile Camera")
+
+    def change_attendance_camera(self, choice):
+        if choice == "Laptop Camera":
+            self.vision_engine.change_camera(0)
+            speak_text("Switched to Laptop Camera")
+            self.show_toast("Laptop Camera active", "success")
+        elif choice == "USB Camera":
+            self.vision_engine.change_camera(1)
+            speak_text("Switched to USB Camera")
+            self.show_toast("USB Camera active", "success")
+        elif choice == "Mobile Camera":
+            url = self.ip_cam_entry.get().strip()
+            if url == "":
+                speak_text("Set mobile IP address in Energy Control first")
+                self.show_toast("Set Mobile IP on Energy tab", "error")
+                self.attendance_camera_var.set("Laptop Camera")
+            else:
+                if url.isdigit():
+                    self.vision_engine.change_camera(int(url))
+                    speak_text(f"Switched to Camera {url}")
+                else:
+                    if not url.endswith("video"):
+                        if url.endswith("/"):
+                            url += "video"
+                        else:
+                            url += "/video"
+                    self.vision_engine.change_camera(url)
+                    speak_text("Switched to Mobile Camera")
+                self.show_toast("Mobile Camera active", "success")
 
     def create_switch_card(self, parent, icon, name, var_name, cmd):
         card = ctk.CTkFrame(parent, fg_color=self.BG_MAIN, corner_radius=12, border_width=1, border_color=self.BORDER_MUTED, height=60)
