@@ -13,6 +13,10 @@ import requests # [NEW]: Ultra-fast HTTP requests
 from vision_engine import VisionEngine
 from attendance_manager import AttendanceSessionManager
 
+# [NEW]: Redirect output to log file for easy remote debugging
+sys.stdout = open("app_debug.log", "w", encoding="utf-8", buffering=1)
+sys.stderr = sys.stdout
+
 voice_queue = queue.Queue()
 hardware_queue = queue.Queue()
 
@@ -217,6 +221,7 @@ class VisionLinkApp(ctk.CTk):
 
     def camera_worker(self):
         was_hardware_on_worker = False 
+        print("[CAMERA WORKER] Thread started successfully.")
         while True:
             try:
                 is_ai_active = self.ai_status_var.get()
@@ -242,6 +247,7 @@ class VisionLinkApp(ctk.CTk):
                         self.latest_pil_image = pil_image
                         self.latest_human_present = human_present
                         self._frame_consumed = False
+                    # print(f"[CAMERA WORKER] Captured attendance frame: {pil_image is not None}")
                 else:
                     process_ai_now = is_ai_active and is_any_device_on
                     pil_image, human_present = self.vision_engine.get_frame(ai_active=process_ai_now, scan_mode="energy")
@@ -252,6 +258,7 @@ class VisionLinkApp(ctk.CTk):
                     
                 time.sleep(0.01)
             except Exception as e:
+                print(f"[CAMERA WORKER ERROR] {e}")
                 time.sleep(0.1)
 
     def start_camera_feed(self):
@@ -268,6 +275,7 @@ class VisionLinkApp(ctk.CTk):
         if pil_image:
             if is_attendance_active:
                 if self.current_tab == "attendance" and hasattr(self, 'attendance_camera_screen'):
+                    # print(f"[GUI] Updating attendance camera screen with: {pil_image}")
                     self.update_image_on_label(pil_image, self.attendance_camera_screen)
             else:
                 if self.current_tab == "energy" and hasattr(self, 'camera_screen'):
