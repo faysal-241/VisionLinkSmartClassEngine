@@ -237,7 +237,9 @@ class VisionLinkApp(ctk.CTk):
                     time.sleep(0.01)
                     continue
                 
-                if is_attendance_active:
+                active_tab = getattr(self, 'current_tab', 'attendance')
+                
+                if is_attendance_active and active_tab == "attendance":
                     if self.session_manager.is_paused:
                         pil_image, human_present = self.vision_engine.get_frame(ai_active=False, scan_mode="attendance")
                     else:
@@ -247,7 +249,6 @@ class VisionLinkApp(ctk.CTk):
                         self.latest_pil_image = pil_image
                         self.latest_human_present = human_present
                         self._frame_consumed = False
-                    # print(f"[CAMERA WORKER] Captured attendance frame: {pil_image is not None}")
                 else:
                     process_ai_now = is_ai_active and is_any_device_on
                     pil_image, human_present = self.vision_engine.get_frame(ai_active=process_ai_now, scan_mode="energy")
@@ -273,13 +274,10 @@ class VisionLinkApp(ctk.CTk):
             self._frame_consumed = True
             
         if pil_image:
-            if is_attendance_active:
-                if self.current_tab == "attendance" and hasattr(self, 'attendance_camera_screen'):
-                    # print(f"[GUI] Updating attendance camera screen with: {pil_image}")
-                    self.update_image_on_label(pil_image, self.attendance_camera_screen)
-            else:
-                if self.current_tab == "energy" and hasattr(self, 'camera_screen'):
-                    self.update_image_on_label(pil_image, self.camera_screen)
+            if self.current_tab == "attendance" and is_attendance_active and hasattr(self, 'attendance_camera_screen'):
+                self.update_image_on_label(pil_image, self.attendance_camera_screen)
+            elif self.current_tab == "energy" and hasattr(self, 'camera_screen'):
+                self.update_image_on_label(pil_image, self.camera_screen)
                     
         if is_attendance_active and self.session_manager.is_active and not self.session_manager.is_paused:
             for face_data in getattr(self.vision_engine, 'latest_identified_faces', []):
@@ -333,7 +331,6 @@ class VisionLinkApp(ctk.CTk):
                                 
         self.after(30, self.start_camera_feed)
 
-    # [IMPROVED]: CTkImage caching to reduce GC pressure
     def update_image_on_label(self, pil_image, label):
         orig_w, orig_h = pil_image.size
         ratio = min(850 / orig_w, 540 / orig_h)
@@ -343,6 +340,12 @@ class VisionLinkApp(ctk.CTk):
         cached = self._img_cache.get(cache_key)
         if cached and cached._size == (new_w, new_h):
             cached.configure(light_image=pil_image, dark_image=pil_image)
+            # Re-associate image if it was cleared previously (e.g. image="")
+            try:
+                if label.cget("image") != cached:
+                    label.configure(image=cached, text="")
+            except Exception:
+                label.configure(image=cached, text="")
         else:
             ctk_img = ctk.CTkImage(light_image=pil_image, dark_image=pil_image, size=(new_w, new_h))
             self._img_cache[cache_key] = ctk_img
@@ -561,6 +564,7 @@ class VisionLinkApp(ctk.CTk):
         self.btn_end_scan.configure(state="disabled", fg_color="#4C0519")
         self.timer_label.configure(text=" ⏱  00:00", text_color=self.TEXT_MUTED)
         self.attendance_camera_screen.configure(image="", text="[ Session Ended ]\nReady for Manual Override or Save")
+        self._img_cache.pop(id(self.attendance_camera_screen), None)
         
         speak_text("Session stopped permanently.")
 

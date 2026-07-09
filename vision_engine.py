@@ -19,10 +19,9 @@ except ImportError:
         @staticmethod
         def face_encodings(image, face_locations=None):
             if face_locations is None:
-                # Load whole image (known face template)
+                # Load whole image (fallback if face not detected)
                 gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
-                gray = cv2.resize(gray, (80, 80))
-                gray = cv2.equalizeHist(gray)
+                gray = cv2.resize(gray, (64, 64))
                 mean, std = cv2.meanStdDev(gray)
                 normalized = (gray.astype(np.float32) - mean[0][0]) / (std[0][0] + 1e-5)
                 return [normalized.flatten()]
@@ -36,13 +35,12 @@ except ImportError:
                     crop = image[top:bottom, left:right]
                     # Check if BGR or RGB
                     gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY) if len(crop.shape) == 3 else crop
-                    gray = cv2.resize(gray, (80, 80))
-                    gray = cv2.equalizeHist(gray)
+                    gray = cv2.resize(gray, (64, 64))
                     mean, std = cv2.meanStdDev(gray)
                     normalized = (gray.astype(np.float32) - mean[0][0]) / (std[0][0] + 1e-5)
                     encodings.append(normalized.flatten())
                 else:
-                    encodings.append(np.zeros(6400, dtype=np.float32))
+                    encodings.append(np.zeros(4096, dtype=np.float32))
             return encodings
             
         @staticmethod
@@ -50,8 +48,9 @@ except ImportError:
             if not known_encodings:
                 return []
             distances = MockFaceRecognition.face_distance(known_encodings, face_encoding)
-            # Correlation threshold: distance < 0.65 means correlation > 0.35 (Pearson Correlation)
-            return [dist < 0.65 for dist in distances]
+            # Correlation threshold based on dynamic tolerance
+            threshold = 0.50 + tolerance * 0.5
+            return [dist < threshold for dist in distances]
             
         @staticmethod
         def face_distance(known_encodings, face_encoding):
@@ -60,7 +59,7 @@ except ImportError:
             
             distances = []
             for known in known_encodings:
-                # Both are flat 6400-element normalized vectors
+                # Both are flat 4096-element normalized vectors
                 # Correlation: dot product divided by norms
                 dot_product = np.sum(face_encoding * known)
                 norm_face = np.linalg.norm(face_encoding)
@@ -68,8 +67,6 @@ except ImportError:
                 correlation = dot_product / (norm_face * norm_known + 1e-5)
                 
                 # Convert correlation (-1 to 1) to distance (0 to 2)
-                # If they are identical, correlation = 1.0, distance = 0.0
-                # If they are opposite, correlation = -1.0, distance = 2.0
                 distance = 1.0 - correlation
                 distances.append(distance)
                 
@@ -196,7 +193,23 @@ class VisionEngine:
                 image_path = os.path.join(folder_path, filename)
                 try:
                     image = face_recognition.load_image_file(image_path)
-                    encodings = face_recognition.face_encodings(image)
+                    
+                    # Detect face inside known image to avoid layout/crop mismatch
+                    h, w = image.shape[:2]
+                    blob = cv2.dnn.blobFromImage(cv2.resize(image, (300, 300)), 1.0, (300, 300), (104.0, 177.0, 123.0))
+                    self.face_net.setInput(blob)
+                    detections = self.face_net.forward()
+                    
+                    face_box = None
+                    for i in range(detections.shape[2]):
+                        confidence = detections[0, 0, i, 2]
+                        if confidence > 0.40:
+                            box = detections[0, 0, i, 3:7] * [w, h, w, h]
+                            (startX, startY, endX, endY) = box.astype("int")
+                            face_box = [(startY, endX, endY, startX)]
+                            break
+                            
+                    encodings = face_recognition.face_encodings(image, face_box)
                     if len(encodings) > 0:
                         self.known_face_encodings.append(encodings[0])
                         self.known_face_names.append(student_name)
