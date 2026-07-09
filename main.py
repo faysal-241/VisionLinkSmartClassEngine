@@ -552,7 +552,7 @@ class VisionLinkApp(ctk.CTk):
         self.btn_pause_scan.configure(state="disabled", text="  ⏸     PAUSE", fg_color=self.BORDER_MUTED)
         self.btn_end_scan.configure(state="disabled", fg_color="#4C0519")
         self.timer_label.configure(text=" ⏱  00:00", text_color=self.TEXT_MUTED)
-        self.attendance_camera_screen.configure(image=None, text="[ Session Ended ]\nReady for Manual Override or Save")
+        self.attendance_camera_screen.configure(image="", text="[ Session Ended ]\nReady for Manual Override or Save")
         
         speak_text("Session stopped permanently.")
 
