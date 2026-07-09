@@ -62,20 +62,42 @@ class AttendanceSessionManager:
                     return True  # New student added to the list
         return False
 
-    def save_to_csv(self):
+    def save_to_csv(self, time_slot="N/A"):
         if len(self.present_students) == 0:
             return False
             
         file_exists = os.path.isfile("attendance.csv")
+        
+        # Check if we need to migrate an old CSV format without the Time Slot column
+        if file_exists and os.path.getsize("attendance.csv") > 0:
+            try:
+                with open("attendance.csv", mode='r', newline='') as f:
+                    reader = list(csv.reader(f))
+                if reader and len(reader[0]) > 0 and "Time Slot" not in reader[0]:
+                    new_rows = []
+                    header = reader[0]
+                    # Insert "Time Slot" at index 2
+                    header.insert(2, "Time Slot")
+                    new_rows.append(header)
+                    for row in reader[1:]:
+                        if len(row) >= 4:
+                            row.insert(2, "N/A")
+                            new_rows.append(row)
+                    with open("attendance.csv", mode='w', newline='') as f:
+                        writer = csv.writer(f)
+                        writer.writerows(new_rows)
+            except Exception as e:
+                print(f"[MIGRATION ERROR] {e}")
+
         date_str = datetime.now().strftime("%Y-%m-%d")
         time_str = datetime.now().strftime("%I:%M %p")
         
         with open("attendance.csv", mode='a', newline='') as file:
             writer = csv.writer(file)
-            if not file_exists:
-                writer.writerow(["Date", "Time", "Student ID", "Student Name", "Status"])
+            if not file_exists or os.path.getsize("attendance.csv") == 0:
+                writer.writerow(["Date", "Time", "Time Slot", "Student ID", "Student Name", "Status"])
             
             for s_id, s_name in self.present_students.items():
-                writer.writerow([date_str, time_str, s_id, s_name, "Present"])
+                writer.writerow([date_str, time_str, time_slot, s_id, s_name, "Present"])
                 
         return True

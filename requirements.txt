@@ -5,3 +5,4 @@ Pillow
 face_recognition
 dlib
 pyttsx3
+requests
