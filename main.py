@@ -667,10 +667,17 @@ class VisionLinkApp(ctk.CTk):
         
         btn_container = ctk.CTkFrame(cam_box, fg_color="transparent")
         btn_container.pack(pady=(0, 10))
-        btn_laptop = ctk.CTkButton(btn_container, text="Laptop Cam", width=100, fg_color="#1E293B", hover_color=self.ACCENT_CYAN, command=lambda: self.change_camera_source("laptop"))
+        
+        # --- [NEW UPDATE]: 3 Buttons with adjusted width ---
+        btn_laptop = ctk.CTkButton(btn_container, text="Laptop Cam", width=90, fg_color="#1E293B", hover_color=self.ACCENT_CYAN, command=lambda: self.change_camera_source("laptop"))
         btn_laptop.pack(side="left", padx=5)
-        btn_mobile = ctk.CTkButton(btn_container, text="Mobile Cam", width=100, fg_color="#1E293B", hover_color=self.NEON_GREEN, command=lambda: self.change_camera_source("mobile"))
+        
+        btn_usb = ctk.CTkButton(btn_container, text="USB Cam", width=90, fg_color="#1E293B", hover_color=self.WARNING_ORANGE, command=lambda: self.change_camera_source("usb"))
+        btn_usb.pack(side="left", padx=5)
+        
+        btn_mobile = ctk.CTkButton(btn_container, text="Mobile Cam", width=90, fg_color="#1E293B", hover_color=self.NEON_GREEN, command=lambda: self.change_camera_source("mobile"))
         btn_mobile.pack(side="left", padx=5)
+        # ---------------------------------------------------
         
         self.sleep_mode_box = ctk.CTkFrame(control_panel, fg_color="#064E3B", corner_radius=12, border_width=1, border_color=self.NEON_GREEN, height=75)
         self.sleep_mode_box.pack(fill="x", padx=30, pady=(30, 0))
@@ -682,6 +689,9 @@ class VisionLinkApp(ctk.CTk):
         if cam_type == "laptop":
             self.vision_engine.change_camera(0)
             speak_text("Switched to Laptop Camera")
+        elif cam_type == "usb":
+            self.vision_engine.change_camera(1)
+            speak_text("Switched to USB Camera")
         elif cam_type == "mobile":
             url = self.ip_cam_entry.get().strip()
             if url == "":
@@ -694,7 +704,7 @@ class VisionLinkApp(ctk.CTk):
                         url += "/video"
                 self.vision_engine.change_camera(url)
                 speak_text("Switched to Mobile Camera")
-
+                
     def create_switch_card(self, parent, icon, name, var_name, cmd):
         card = ctk.CTkFrame(parent, fg_color=self.BG_MAIN, corner_radius=12, border_width=1, border_color=self.BORDER_MUTED, height=60)
         card.pack(fill="x", padx=30, pady=(0, 15))
