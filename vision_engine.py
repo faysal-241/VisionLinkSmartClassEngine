@@ -177,6 +177,10 @@ class VisionEngine:
             print("[ERROR] No Camera Access!")
             
         # Thread safety lock for sharing camera source between main/grabber threads
+        self.known_face_encodings = []
+        self.known_face_names = []
+        self.known_face_ids = []
+        
         import threading
         self.cap_lock = threading.Lock()
         self.latest_frame = None
