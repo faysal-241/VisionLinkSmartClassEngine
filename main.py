@@ -71,8 +71,11 @@ def hardware_worker():
             print(f"[HARDWARE ERROR] Failed to reach ESP32: {e}")
         hardware_queue.task_done()
 
-threading.Thread(target=voice_worker, daemon=True).start()
-threading.Thread(target=hardware_worker, daemon=True).start()
+voice_thread = threading.Thread(target=voice_worker, daemon=True)
+voice_thread.start()
+
+hw_thread = threading.Thread(target=hardware_worker, daemon=True)
+hw_thread.start()
 
 def speak_text(text):
     voice_queue.put(text)
@@ -200,6 +203,11 @@ class VisionLinkApp(ctk.CTk):
 
     def on_closing(self):
         print("[SYSTEM] Shutting down all engines and cameras...")
+        
+        # [NEW]: Send OFF signals to ESP32 for light and fan when closing the program!
+        self.send_hardware_command("light_off")
+        self.send_hardware_command("fan_off")
+        
         if hasattr(self, 'vision_engine'):
             self.vision_engine.release_camera()
             # [IMPROVED]: Properly terminate AI subprocess
@@ -209,6 +217,14 @@ class VisionLinkApp(ctk.CTk):
         # Signal workers to stop
         voice_queue.put(None)
         hardware_queue.put(None)
+        
+        # Wait up to 2.5 seconds for the final ESP32 signals to be sent before killing process
+        try:
+            hw_thread.join(timeout=2.5)
+            voice_thread.join(timeout=1.0)
+        except Exception:
+            pass
+            
         self.destroy()
         os._exit(0)
 
@@ -272,6 +288,15 @@ class VisionLinkApp(ctk.CTk):
                 self.update_image_on_label(pil_image, self.attendance_camera_screen)
             elif self.current_tab == "energy" and hasattr(self, 'camera_screen'):
                 self.update_image_on_label(pil_image, self.camera_screen)
+        else:
+            if self.current_tab == "attendance" and is_attendance_active and hasattr(self, 'attendance_camera_screen'):
+                self.attendance_camera_screen.configure(image="", text="⚠️  Camera Not Found\nPlease check connection.")
+                if id(self.attendance_camera_screen) in self._img_cache:
+                    self._img_cache.pop(id(self.attendance_camera_screen))
+            elif self.current_tab == "energy" and hasattr(self, 'camera_screen'):
+                self.camera_screen.configure(image="", text="⚠️  Camera Not Found\nPlease check connection.")
+                if id(self.camera_screen) in self._img_cache:
+                    self._img_cache.pop(id(self.camera_screen))
 
         if is_attendance_active and self.session_manager.is_active and not self.session_manager.is_paused:
             for face_data in getattr(self.vision_engine, 'latest_identified_faces', []):
@@ -434,18 +459,14 @@ class VisionLinkApp(ctk.CTk):
             ("01:00 PM - 02:30 PM", 780, 870),
             ("02:30 PM - 04:00 PM", 870, 960),
             ("04:00 PM - 05:30 PM", 960, 1050),
-            ("05:30 PM - 07:00 PM", 1050, 1140),
-            ("07:00 PM - 08:30 PM", 1140, 1230),
-            ("08:30 PM - 10:00 PM", 1230, 1320),
         ]
         
         for slot_name, start, end in slots:
             if start <= current_minutes < end:
                 return slot_name
                 
-        if current_minutes < 510:
-            return "08:30 AM - 10:00 AM"
-        return "08:30 PM - 10:00 PM"
+        # Any time after 5:30 PM or before 8:30 AM falls into the overnight slot
+        return "05:30 PM - 08:30 AM"
 
     def setup_attendance_frame(self):
         self.frame_attendance.grid_columnconfigure(0, weight=1)
@@ -470,9 +491,7 @@ class VisionLinkApp(ctk.CTk):
                 "01:00 PM - 02:30 PM",
                 "02:30 PM - 04:00 PM",
                 "04:00 PM - 05:30 PM",
-                "05:30 PM - 07:00 PM",
-                "07:00 PM - 08:30 PM",
-                "08:30 PM - 10:00 PM"
+                "05:30 PM - 08:30 AM"
             ],
             variable=self.time_slot_var,
             width=180,
@@ -1038,9 +1057,7 @@ class VisionLinkApp(ctk.CTk):
                 "01:00 PM - 02:30 PM",
                 "02:30 PM - 04:00 PM",
                 "04:00 PM - 05:30 PM",
-                "05:30 PM - 07:00 PM",
-                "07:00 PM - 08:30 PM",
-                "08:30 PM - 10:00 PM"
+                "05:30 PM - 08:30 AM"
             ],
             variable=self.records_slot_filter_var,
             width=170,
