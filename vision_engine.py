@@ -261,10 +261,18 @@ class VisionEngine:
     def change_camera(self, new_source):
         if self.cap.isOpened():
             self.cap.release()
+            
         if isinstance(new_source, str) and new_source.isdigit():
             new_source = int(new_source)
+            
         self.camera_source = new_source
-        self.cap = cv2.VideoCapture(new_source)
+        
+        # [NEW FIX]: Windows DirectShow Force for USB Webcams
+        if isinstance(new_source, int):
+            self.cap = cv2.VideoCapture(new_source, cv2.CAP_DSHOW)
+        else:
+            self.cap = cv2.VideoCapture(new_source)
+            
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
     def get_frame(self, ai_active=True, scan_mode="energy"):
