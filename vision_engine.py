@@ -364,7 +364,8 @@ class VisionEngine:
         h, w = frame.shape[:2]
         
         if not ai_active:
-            self.presence_timer = 0
+            if self.presence_timer < self.MAX_TIMER:
+                self.presence_timer = 0
             self._last_timer_val = 0
             self.last_presence_time = time.time()
             final_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
