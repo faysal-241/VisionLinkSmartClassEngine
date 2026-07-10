@@ -176,9 +176,11 @@ class VisionEngine:
         else:
             print("[ERROR] No Camera Access!")
             
-        self.known_face_encodings = []
-        self.known_face_names = []
-        self.known_face_ids = []
+        # Thread safety lock for sharing camera source between main/grabber threads
+        import threading
+        self.cap_lock = threading.Lock()
+        self.latest_frame = None
+        self.frame_ret = False
         
         self.download_models()
         self.face_net = cv2.dnn.readNetFromCaffe(self.face_proto, self.face_model)
@@ -201,7 +203,30 @@ class VisionEngine:
         self.latest_identified_faces = []
         self.presence_timer = 0
         self.MAX_TIMER = 150
+        
+        # Start the background grabber thread to completely eliminate network latency
+        self.grab_thread = threading.Thread(target=self._grab_frames_worker, daemon=True)
+        self.grab_thread.start()
+        
         print("[SUCCESS] Enterprise Hybrid Tracker Ready!")
+
+    def _grab_frames_worker(self):
+        import time
+        while self.running:
+            try:
+                with self.cap_lock:
+                    if self.cap is not None and self.cap.isOpened():
+                        ret, frame = self.cap.read()
+                        if ret:
+                            self.latest_frame = frame
+                            self.frame_ret = True
+                        else:
+                            self.frame_ret = False
+                    else:
+                        self.frame_ret = False
+            except Exception:
+                self.frame_ret = False
+            time.sleep(0.005)
 
     def load_known_faces(self):
         folder_path = "known_faces"
@@ -304,29 +329,30 @@ class VisionEngine:
                     print(f"[DOWNLOAD WARN] {e}, trying next URL...")
 
     def change_camera(self, new_source):
-        if self.cap.isOpened():
-            self.cap.release()
+        with self.cap_lock:
+            if self.cap.isOpened():
+                self.cap.release()
+                
+            if isinstance(new_source, str) and new_source.isdigit():
+                new_source = int(new_source)
+                
+            self.camera_source = new_source
             
-        if isinstance(new_source, str) and new_source.isdigit():
-            new_source = int(new_source)
-            
-        self.camera_source = new_source
-        
-        # [NEW FIX]: Windows DirectShow Force for USB Webcams
-        if isinstance(new_source, int):
-            self.cap = cv2.VideoCapture(new_source, cv2.CAP_DSHOW)
-        else:
-            self.cap = cv2.VideoCapture(new_source)
-            
-        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            # [NEW FIX]: Windows DirectShow Force for USB Webcams
+            if isinstance(new_source, int):
+                self.cap = cv2.VideoCapture(new_source, cv2.CAP_DSHOW)
+            else:
+                self.cap = cv2.VideoCapture(new_source)
+                
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            self.latest_frame = None
+            self.frame_ret = False
 
     def get_frame(self, ai_active=True, scan_mode="energy"):
-        if not self.cap.isOpened():
-            return None, False
-            
-        ret, frame = self.cap.read()
-        if not ret:
-            return None, False
+        with self.cap_lock:
+            if not self.frame_ret or self.latest_frame is None:
+                return None, False
+            frame = self.latest_frame.copy()
             
         if isinstance(self.camera_source, str):
             frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
@@ -512,5 +538,6 @@ class VisionEngine:
 
     def release_camera(self):
         self.running = False
-        if self.cap.isOpened():
-            self.cap.release()
+        with self.cap_lock:
+            if self.cap.isOpened():
+                self.cap.release()
