@@ -13,10 +13,6 @@ import requests # [NEW]: Ultra-fast HTTP requests
 from vision_engine import VisionEngine
 from attendance_manager import AttendanceSessionManager
 
-# [NEW]: Redirect output to log file for easy remote debugging
-sys.stdout = open("app_debug.log", "w", encoding="utf-8", buffering=1)
-sys.stderr = sys.stdout
-
 voice_queue = queue.Queue()
 hardware_queue = queue.Queue()
 # [NEW]: Thread-safe lock for shared camera frame data
@@ -426,16 +422,45 @@ class VisionLinkApp(ctk.CTk):
     # ==================================================================================
     #   📷  ATTENDANCE FRAME
     # ==================================================================================
+    def get_current_time_slot(self):
+        import datetime
+        now = datetime.datetime.now()
+        current_minutes = now.hour * 60 + now.minute
+        
+        slots = [
+            ("08:30 AM - 10:00 AM", 510, 600),
+            ("10:00 AM - 11:30 AM", 600, 690),
+            ("11:30 AM - 01:00 PM", 690, 780),
+            ("01:00 PM - 02:30 PM", 780, 870),
+            ("02:30 PM - 04:00 PM", 870, 960),
+            ("04:00 PM - 05:30 PM", 960, 1050),
+            ("05:30 PM - 07:00 PM", 1050, 1140),
+            ("07:00 PM - 08:30 PM", 1140, 1230),
+            ("08:30 PM - 10:00 PM", 1230, 1320),
+        ]
+        
+        for slot_name, start, end in slots:
+            if start <= current_minutes < end:
+                return slot_name
+                
+        if current_minutes < 510:
+            return "08:30 AM - 10:00 AM"
+        return "08:30 PM - 10:00 PM"
+
     def setup_attendance_frame(self):
+        self.frame_attendance.grid_columnconfigure(0, weight=1)
+        self.frame_attendance.grid_rowconfigure(1, weight=1)
+
+        # Top bar of attendance panel
         top_bar = ctk.CTkFrame(self.frame_attendance, fg_color=self.BG_CARD, height=60, corner_radius=10, border_width=1, border_color=self.BORDER_MUTED)
-        top_bar.pack(side="top", fill="x", pady=(0, 20))
+        top_bar.pack(fill="x", pady=(0, 15))
         top_bar.pack_propagate(False)
 
         ctk.CTkLabel(top_bar, text="    🎓  Course: Software Engineering", font=ctk.CTkFont(size=18, weight="bold"), text_color=self.TEXT_WHITE).pack(side="left", padx=20)
 
-        # [NEW]: Time Slot dropdown in top bar
+        # [NEW]: Time Slot dropdown in top bar (dynamically defaults to current time slot!)
         ctk.CTkLabel(top_bar, text=" 📅  Time Slot:", font=ctk.CTkFont(size=14, weight="bold"), text_color=self.TEXT_WHITE).pack(side="left", padx=(30, 10))
-        self.time_slot_var = ctk.StringVar(value="08:30 AM - 10:00 AM")
+        self.time_slot_var = ctk.StringVar(value=self.get_current_time_slot())
         self.time_slot_menu = ctk.CTkOptionMenu(
             top_bar,
             values=[
@@ -444,7 +469,10 @@ class VisionLinkApp(ctk.CTk):
                 "11:30 AM - 01:00 PM",
                 "01:00 PM - 02:30 PM",
                 "02:30 PM - 04:00 PM",
-                "04:00 PM - 05:30 PM"
+                "04:00 PM - 05:30 PM",
+                "05:30 PM - 07:00 PM",
+                "07:00 PM - 08:30 PM",
+                "08:30 PM - 10:00 PM"
             ],
             variable=self.time_slot_var,
             width=180,
@@ -786,22 +814,29 @@ class VisionLinkApp(ctk.CTk):
         cam_box = ctk.CTkFrame(control_panel, fg_color=self.BG_MAIN, corner_radius=12, border_width=1, border_color=self.BORDER_MUTED)
         cam_box.pack(fill="x", padx=30, pady=(15, 0), ipady=5)
         ctk.CTkLabel(cam_box, text="    🎥   Camera Source", font=ctk.CTkFont(size=14, weight="bold"), text_color=self.TEXT_WHITE).pack(pady=(10, 5))
-        self.ip_cam_entry = ctk.CTkEntry(cam_box, placeholder_text="http://192.168.x.x:8080/video", width=220, border_color=self.ACCENT_CYAN)
-        self.ip_cam_entry.pack(pady=(0, 10))
 
         btn_container = ctk.CTkFrame(cam_box, fg_color="transparent")
         btn_container.pack(pady=(0, 10))
 
-        # --- [NEW UPDATE]: 3 Buttons with adjusted width ---
-        btn_laptop = ctk.CTkButton(btn_container, text="Laptop Cam", width=75, fg_color=self.BG_CARD, hover_color=self.ACCENT_CYAN, command=lambda: self.change_camera_source("laptop"))
-        btn_laptop.pack(side="left", padx=3)
+        # --- [NEW UPDATE]: 3 Buttons with adjusted width and store references ---
+        self.btn_laptop = ctk.CTkButton(btn_container, text="Laptop Cam", width=75, fg_color=self.ACCENT_CYAN, hover_color=self.ACCENT_CYAN, command=lambda: self.change_camera_source("laptop"))
+        self.btn_laptop.pack(side="left", padx=3)
 
-        btn_usb = ctk.CTkButton(btn_container, text="USB Cam", width=75, fg_color=self.BG_CARD, hover_color=self.WARNING_ORANGE, command=lambda: self.change_camera_source("usb"))
-        btn_usb.pack(side="left", padx=3)
+        self.btn_usb = ctk.CTkButton(btn_container, text="USB Cam", width=75, fg_color=self.BG_CARD, hover_color=self.WARNING_ORANGE, command=lambda: self.change_camera_source("usb"))
+        self.btn_usb.pack(side="left", padx=3)
 
-        btn_mobile = ctk.CTkButton(btn_container, text="Mobile Cam", width=75, fg_color=self.BG_CARD, hover_color=self.NEON_GREEN, command=lambda: self.change_camera_source("mobile"))
-        btn_mobile.pack(side="left", padx=3)
+        self.btn_mobile = ctk.CTkButton(btn_container, text="Mobile Cam", width=75, fg_color=self.BG_CARD, hover_color=self.NEON_GREEN, command=lambda: self.change_camera_source("mobile"))
+        self.btn_mobile.pack(side="left", padx=3)
         # ---------------------------------------------------
+
+        # IP camera frame (hidden by default)
+        self.ip_cam_frame = ctk.CTkFrame(cam_box, fg_color="transparent")
+        
+        self.ip_cam_entry = ctk.CTkEntry(self.ip_cam_frame, placeholder_text="http://192.168.x.x:8080/video", width=140, border_color=self.ACCENT_CYAN)
+        self.ip_cam_entry.pack(side="left", padx=(0, 5), pady=(0, 10))
+        
+        btn_connect = ctk.CTkButton(self.ip_cam_frame, text="Connect", width=60, fg_color=self.ACCENT_CYAN, text_color=self.BG_MAIN, hover_color=self.NEON_GREEN, command=self.connect_mobile_camera)
+        btn_connect.pack(side="left", pady=(0, 10))
 
         self.sleep_mode_box = ctk.CTkFrame(control_panel, fg_color=self.BG_MAIN, corner_radius=12, border_width=1, border_color=self.BORDER_MUTED, height=75)
         self.sleep_mode_box.pack(fill="x", padx=30, pady=(30, 0))
@@ -810,11 +845,40 @@ class VisionLinkApp(ctk.CTk):
         self.sleep_mode_text.pack(expand=True)
 
     def change_camera_source(self, cam_type):
-        # Shift camera in a background thread to prevent UI freezing
-        threading.Thread(target=self._process_camera_change, args=(cam_type,), daemon=True).start()
+        if cam_type == "laptop":
+            if hasattr(self, 'ip_cam_frame'):
+                self.ip_cam_frame.pack_forget()
+            self.update_camera_button_states("laptop")
+            threading.Thread(target=self._process_camera_change, args=("laptop",), daemon=True).start()
+        elif cam_type == "usb":
+            if hasattr(self, 'ip_cam_frame'):
+                self.ip_cam_frame.pack_forget()
+            self.update_camera_button_states("usb")
+            threading.Thread(target=self._process_camera_change, args=("usb",), daemon=True).start()
+        elif cam_type == "mobile":
+            if hasattr(self, 'ip_cam_frame'):
+                self.ip_cam_frame.pack(pady=(0, 5))
+            self.update_camera_button_states("mobile")
+            speak_text("Please enter mobile IP address and click connect")
+
+    def connect_mobile_camera(self):
+        threading.Thread(target=self._process_camera_change, args=("mobile",), daemon=True).start()
+
+    def update_camera_button_states(self, active_type):
+        if not hasattr(self, 'btn_laptop') or not self.btn_laptop:
+            return
+        self.btn_laptop.configure(fg_color=self.BG_CARD)
+        self.btn_usb.configure(fg_color=self.BG_CARD)
+        self.btn_mobile.configure(fg_color=self.BG_CARD)
+        
+        if active_type == "laptop":
+            self.btn_laptop.configure(fg_color=self.ACCENT_CYAN)
+        elif active_type == "usb":
+            self.btn_usb.configure(fg_color=self.WARNING_ORANGE)
+        elif active_type == "mobile":
+            self.btn_mobile.configure(fg_color=self.NEON_GREEN)
 
     def _process_camera_change(self, cam_type):
-        # Show temporary loading text while switching
         if hasattr(self, 'camera_screen'):
             self.camera_screen.configure(image="", text="[ Switching Camera... ]\nPlease wait safely.")
         
@@ -836,6 +900,8 @@ class VisionLinkApp(ctk.CTk):
             url = self.ip_cam_entry.get().strip()
             if url == "":
                 speak_text("Please enter mobile IP address first")
+                if hasattr(self, 'camera_screen'):
+                    self.camera_screen.configure(image="", text="[ Offline Standby ]\nPlease select a camera source.")
             else:
                 if url.isdigit():
                     self.vision_engine.change_camera(int(url))
@@ -955,14 +1021,44 @@ class VisionLinkApp(ctk.CTk):
         controls_bar.pack(fill="x", pady=(0, 10))
         controls_bar.pack_propagate(False)
 
-        self.records_search = ctk.CTkEntry(controls_bar, placeholder_text=" 🔍  Search by Student ID or Name...", width=350, height=40, border_color=self.ACCENT_CYAN, fg_color=self.BG_CARD)
+        self.records_search = ctk.CTkEntry(controls_bar, placeholder_text=" 🔍  Search by Student ID or Name...", width=260, height=40, border_color=self.ACCENT_CYAN, fg_color=self.BG_CARD)
         self.records_search.pack(side="left", padx=(0, 15))
         self.records_search.bind("<KeyRelease>", lambda e: self.load_records_data())
 
-        btn_refresh = ctk.CTkButton(controls_bar, text="   🔄   Refresh", font=ctk.CTkFont(size=14, weight="bold"), height=40, width=120, fg_color=self.ACCENT_CYAN, text_color="#000000", hover_color="#FFFFFF", command=self.load_records_data)
+        # Time Slot Filter Dropdown
+        ctk.CTkLabel(controls_bar, text="Filter Slot:", font=ctk.CTkFont(size=14, weight="bold"), text_color=self.TEXT_WHITE).pack(side="left", padx=(0, 5))
+        self.records_slot_filter_var = ctk.StringVar(value="All Slots")
+        self.records_slot_filter = ctk.CTkOptionMenu(
+            controls_bar,
+            values=[
+                "All Slots",
+                "08:30 AM - 10:00 AM",
+                "10:00 AM - 11:30 AM",
+                "11:30 AM - 01:00 PM",
+                "01:00 PM - 02:30 PM",
+                "02:30 PM - 04:00 PM",
+                "04:00 PM - 05:30 PM",
+                "05:30 PM - 07:00 PM",
+                "07:00 PM - 08:30 PM",
+                "08:30 PM - 10:00 PM"
+            ],
+            variable=self.records_slot_filter_var,
+            width=170,
+            height=40,
+            fg_color=self.BG_MAIN,
+            button_color=self.ACCENT_CYAN,
+            button_hover_color=self.NEON_GREEN,
+            dropdown_fg_color=self.BG_MAIN,
+            dropdown_hover_color=self.ACCENT_CYAN,
+            dropdown_text_color=self.TEXT_WHITE,
+            command=lambda v: self.load_records_data()
+        )
+        self.records_slot_filter.pack(side="left", padx=(0, 15))
+
+        btn_refresh = ctk.CTkButton(controls_bar, text="   🔄   Refresh", font=ctk.CTkFont(size=14, weight="bold"), height=40, width=110, fg_color=self.ACCENT_CYAN, text_color="#000000", hover_color="#FFFFFF", command=self.load_records_data)
         btn_refresh.pack(side="left", padx=(0, 10))
 
-        btn_clear = ctk.CTkButton(controls_bar, text="   🗑   Clear All", font=ctk.CTkFont(size=14, weight="bold"), height=40, width=120, fg_color="#4C0519", hover_color=self.ALERT_RED, command=self.clear_all_records)
+        btn_clear = ctk.CTkButton(controls_bar, text="   🗑   Clear All", font=ctk.CTkFont(size=14, weight="bold"), height=40, width=110, fg_color="#4C0519", hover_color=self.ALERT_RED, command=self.clear_all_records)
         btn_clear.pack(side="right")
 
         # Table header
@@ -1023,10 +1119,42 @@ class VisionLinkApp(ctk.CTk):
                         filtered_records.append(r)
             records = filtered_records
 
+        # Filter by selected time slot
+        slot_filter = self.records_slot_filter_var.get()
+        if slot_filter != "All Slots":
+            filtered_by_slot = []
+            for r in records:
+                r_slot = r[2] if len(r) >= 6 else "N/A"
+                if r_slot == slot_filter:
+                    filtered_by_slot.append(r)
+            records = filtered_by_slot
+
         # Reverse to show newest first
         records.reverse()
 
-        self.records_count_label.configure(text=f" 📊  Total: {len(records)} records")
+        # Count unique student attendances (unique per Date + Time Slot + Student ID) to avoid duplicate scans
+        present_keys = set()
+        for r in records:
+            if len(r) >= 6:
+                r_date = r[0]
+                r_slot = r[2]
+                r_id = r[3]
+                status = r[5]
+            else:
+                r_date = r[0]
+                r_slot = "N/A"
+                r_id = r[2]
+                status = r[4]
+                
+            if status == "Present":
+                present_keys.add((r_date, r_slot, r_id))
+                
+        total_present = len(present_keys)
+
+        if slot_filter == "All Slots":
+            self.records_count_label.configure(text=f" 📊  Total: {len(records)} records | Present: {total_present}")
+        else:
+            self.records_count_label.configure(text=f" 📊  Slot Present: {total_present} students")
 
         if len(records) == 0:
             empty_lbl = ctk.CTkLabel(self.records_scroll, text="No matching records found.", font=ctk.CTkFont(size=16), text_color=self.TEXT_MUTED)

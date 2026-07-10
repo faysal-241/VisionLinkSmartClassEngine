@@ -12,44 +12,79 @@ except ImportError:
     HAS_FACE_RECOGNITION = False
     print("[SYSTEM] face_recognition package not found. Activating Zero-Dependency Mock Mode.")
     class MockFaceRecognition:
+        _detector = None
+        _recognizer = None
+        
+        @staticmethod
+        def _init_models():
+            if MockFaceRecognition._detector is None:
+                yunet_model = "ai_models/face_detection_yunet_2023mar.onnx"
+                sface_model = "ai_models/face_recognition_sface_2021dec.onnx"
+                
+                if not os.path.exists(yunet_model) or not os.path.exists(sface_model):
+                    os.makedirs("ai_models", exist_ok=True)
+                    import urllib.request
+                    opener = urllib.request.build_opener()
+                    opener.addheaders = [('User-Agent', 'Mozilla/5.0')]
+                    urllib.request.install_opener(opener)
+                    if not os.path.exists(yunet_model):
+                        print("[SYSTEM] YuNet ONNX model missing. Downloading...")
+                        urllib.request.urlretrieve("https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx", yunet_model)
+                    if not os.path.exists(sface_model):
+                        print("[SYSTEM] SFace ONNX model missing. Downloading...")
+                        urllib.request.urlretrieve("https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx", sface_model)
+                
+                MockFaceRecognition._detector = cv2.FaceDetectorYN_create(
+                    model=yunet_model,
+                    config="",
+                    input_size=(320, 320),
+                    score_threshold=0.6,
+                    nms_threshold=0.3,
+                    top_k=5000
+                )
+                MockFaceRecognition._recognizer = cv2.FaceRecognizerSF_create(
+                    model=sface_model,
+                    config=""
+                )
+        
         @staticmethod
         def load_image_file(image_path):
             return cv2.imread(image_path)
             
         @staticmethod
         def face_encodings(image, face_locations=None):
-            if face_locations is None:
-                # Load whole image (fallback if face not detected)
-                gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
-                gray = cv2.resize(gray, (64, 64))
-                mean, std = cv2.meanStdDev(gray)
-                normalized = (gray.astype(np.float32) - mean[0][0]) / (std[0][0] + 1e-5)
-                return [normalized.flatten()]
+            MockFaceRecognition._init_models()
+            h, w = image.shape[:2]
+            MockFaceRecognition._detector.setInputSize((w, h))
+            _, faces = MockFaceRecognition._detector.detect(image)
             
             encodings = []
-            h, w = image.shape[:2]
-            for (top, right, bottom, left) in face_locations:
-                # Crop face box safely
-                top, right, bottom, left = max(0, top), min(w, right), min(h, bottom), max(0, left)
-                if bottom - top > 10 and right - left > 10:
-                    crop = image[top:bottom, left:right]
-                    # Check if BGR or RGB
-                    gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY) if len(crop.shape) == 3 else crop
-                    gray = cv2.resize(gray, (64, 64))
-                    mean, std = cv2.meanStdDev(gray)
-                    normalized = (gray.astype(np.float32) - mean[0][0]) / (std[0][0] + 1e-5)
-                    encodings.append(normalized.flatten())
+            if faces is not None and len(faces) > 0:
+                for face in faces:
+                    aligned = MockFaceRecognition._recognizer.alignCrop(image, face)
+                    feat = MockFaceRecognition._recognizer.feature(aligned)
+                    encodings.append(feat.flatten())
+            else:
+                if face_locations is not None:
+                    for (top, right, bottom, left) in face_locations:
+                        top, right, bottom, left = max(0, top), min(w, right), min(h, bottom), max(0, left)
+                        crop = image[top:bottom, left:right]
+                        if crop.size > 0:
+                            resized = cv2.resize(crop, (112, 112))
+                            feat = MockFaceRecognition._recognizer.feature(resized)
+                            encodings.append(feat.flatten())
+                        else:
+                            encodings.append(np.zeros(128, dtype=np.float32))
                 else:
-                    encodings.append(np.zeros(4096, dtype=np.float32))
+                    encodings.append(np.zeros(128, dtype=np.float32))
             return encodings
             
         @staticmethod
-        def compare_faces(known_encodings, face_encoding, tolerance=0.45):
+        def compare_faces(known_encodings, face_encoding, tolerance=0.363):
             if not known_encodings:
                 return []
             distances = MockFaceRecognition.face_distance(known_encodings, face_encoding)
-            # Correlation threshold based on dynamic tolerance
-            threshold = 0.50 + tolerance * 0.5
+            threshold = 1.0 - tolerance
             return [dist < threshold for dist in distances]
             
         @staticmethod
@@ -59,22 +94,21 @@ except ImportError:
             
             distances = []
             for known in known_encodings:
-                # Both are flat 4096-element normalized vectors
-                # Correlation: dot product divided by norms
                 dot_product = np.sum(face_encoding * known)
                 norm_face = np.linalg.norm(face_encoding)
                 norm_known = np.linalg.norm(known)
-                correlation = dot_product / (norm_face * norm_known + 1e-5)
-                
-                # Convert correlation (-1 to 1) to distance (0 to 2)
-                distance = 1.0 - correlation
-                distances.append(distance)
-                
+                similarity = dot_product / (norm_face * norm_known + 1e-5)
+                distances.append(1.0 - similarity)
             return np.array(distances)
             
     face_recognition = MockFaceRecognition
 
-print("[SYSTEM] Loading Pure Human Structure AI Engine (Enterprise Hybrid Tracker)...")
+def log_debug(msg):
+    try:
+        with open("ai_debug.log", "a", encoding="utf-8") as f:
+            f.write(f"{msg}\n")
+    except Exception:
+        pass
 
 # ==============================================================================
 #  🧠  THE DEEP AI BRAIN (Runs on Core 2 - Heavy Identity Scanner)
@@ -105,6 +139,8 @@ def ai_worker_core(frame_queue, result_queue, known_encodings, known_names, know
                     face_distances = face_recognition.face_distance(known_encodings, face_encoding)
                     
                     if len(face_distances) > 0:
+                        debug_info = [f"{known_names[i]}: {dist:.3f}" for i, dist in enumerate(face_distances)]
+                        log_debug(f"[AI CORE DEBUG] Live face matches: {debug_info}")
                         best_match_index = np.argmin(face_distances)
                         if matches[best_match_index]:
                             name = known_names[best_match_index]
@@ -117,7 +153,7 @@ def ai_worker_core(frame_queue, result_queue, known_encodings, known_names, know
                     except Exception: pass
                 result_queue.put(results)
             except Exception as e:
-                print(f"[AI CORE ERROR] {e}")
+                log_debug(f"[AI CORE ERROR] {e}")
 
 # ==============================================================================
 #  📷  THE LIVE TRACKER CORE (Runs on Core 1 - Super Fast 60FPS Tracker)
@@ -207,17 +243,21 @@ class VisionEngine:
                             box = detections[0, 0, i, 3:7] * [w, h, w, h]
                             (startX, startY, endX, endY) = box.astype("int")
                             face_box = [(startY, endX, endY, startX)]
+                            log_debug(f"  [DB DETECT] {filename} face box: {(startX, startY, endX, endY)}, confidence: {confidence:.2f}")
                             break
+                            
+                    if face_box is None:
+                        log_debug(f"  [DB DETECT WARN] No face detected in {filename}. Using whole image fallback.")
                             
                     encodings = face_recognition.face_encodings(image, face_box)
                     if len(encodings) > 0:
                         self.known_face_encodings.append(encodings[0])
                         self.known_face_names.append(student_name)
                         self.known_face_ids.append(student_id)
-                        print(f"  [OK] Loaded: {student_id} - {student_name}")
+                        log_debug(f"  [OK] Loaded: {student_id} - {student_name}")
                 except Exception as e:
-                    print(f"  [WARN] Failed to load {filename}: {e}")
-        print(f"[SUCCESS] Total {len(self.known_face_names)} faces loaded successfully!")
+                    log_debug(f"  [WARN] Failed to load {filename}: {e}")
+        log_debug(f"[SUCCESS] Total {len(self.known_face_names)} faces loaded successfully!")
 
     def download_models(self):
         self.model_dir = "ai_models"
@@ -240,9 +280,14 @@ class VisionEngine:
                 except Exception as e:
                     print(f"[DOWNLOAD ERROR] Failed to download {name}: {e}")
         
+        self.yunet_model = os.path.join(self.model_dir, "face_detection_yunet_2023mar.onnx")
+        self.sface_model = os.path.join(self.model_dir, "face_recognition_sface_2021dec.onnx")
+        
         safe_download("https://raw.githubusercontent.com/opencv/opencv/master/samples/dnn/face_detector/deploy.prototxt", self.face_proto, "Face Proto")
         safe_download("https://raw.githubusercontent.com/opencv/opencv_3rdparty/dnn_samples_face_detector_20170830/res10_300x300_ssd_iter_140000.caffemodel", self.face_model, "Face Model")
         safe_download("https://raw.githubusercontent.com/PINTO0309/MobileNet-SSD-RealSense/master/caffemodel/MobileNetSSD/MobileNetSSD_deploy.prototxt", self.body_proto, "Body Proto")
+        safe_download("https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx", self.yunet_model, "YuNet Detector")
+        safe_download("https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx", self.sface_model, "SFace Recognizer")
         
         if not os.path.exists(self.body_model):
             urls = [
